@@ -142,6 +142,7 @@ public class SecurityConfig {
                         .username("user")
                         .email("user@gmail.com")
                         .password(passwordEncoder.encode("userPassword"))
+                        .fullName("user")
                         .role(Role.USER)
                         .build();
                 userRepository.save(user);
@@ -152,6 +153,7 @@ public class SecurityConfig {
                         .username("admin")
                         .email("admin@gmail.com")
                         .password(passwordEncoder().encode("adminPassword"))
+                        .fullName("admin")
                         .role(Role.ADMIN)
                         .build();
                 userRepository.save(admin);

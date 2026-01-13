@@ -184,7 +184,7 @@ Make sure you have the following installed:
 #### 📦 Clone the Repository
 ```bash
 git clone https://github.com/Lalegende21/test_project_backend.git
-cd document-management-api
+cd test_entretien
 ```
 
 #### 🗄️ Database Setup (PostgreSQL)
@@ -276,7 +276,7 @@ POST /auth/register
 Or login directly with this credentials
 * user:
 ```json
-* {
+{
 "username": "user",
 "password": "userPassword"
 }
