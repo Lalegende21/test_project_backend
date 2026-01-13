@@ -10,6 +10,8 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
@@ -30,9 +32,10 @@ public class DocumentController {
     // ============== CRÉATION DE DOCUMENT ==============
 
     @PostMapping
-    public ResponseEntity<Document> createDocument(@Valid @RequestBody DocumentCreateDTO payload) {
+    public ResponseEntity<Document> createDocument(@Valid @RequestBody DocumentCreateDTO payload,
+                                                   @AuthenticationPrincipal UserDetails userDetails) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(this.documentService.createDocument(payload));
+                .body(this.documentService.createDocument(payload, userDetails.getUsername()));
     }
 
 
@@ -42,10 +45,11 @@ public class DocumentController {
     @PostMapping("/{documentId}/pieces")
     public ResponseEntity<PieceResponseDTO> uploadPiece(
             @PathVariable Long documentId,
-            @RequestParam("file") MultipartFile file) {
+            @RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal UserDetails userDetails) {
 
         try {
-            Piece piece = documentService.uploadAndClassifyPiece(documentId, file);
+            Piece piece = documentService.uploadAndClassifyPiece(documentId, file, userDetails.getUsername());
 
             PieceResponseDTO response = PieceResponseDTO.builder()
                     .id(piece.getId())
@@ -74,14 +78,15 @@ public class DocumentController {
     @PostMapping("/{documentId}/pieces/batch")
     public ResponseEntity<List<PieceResponseDTO>> uploadMultiplePieces(
             @PathVariable Long documentId,
-            @RequestParam("files") List<MultipartFile> files) {
+            @RequestParam("files") List<MultipartFile> files,
+            @AuthenticationPrincipal UserDetails userDetails) {
 
         List<PieceResponseDTO> responses = new ArrayList<>();
         List<String> errors = new ArrayList<>();
 
         for (int i = 0; i < files.size(); i++) {
             try {
-                Piece piece = documentService.uploadAndClassifyPiece(documentId, files.get(i));
+                Piece piece = documentService.uploadAndClassifyPiece(documentId, files.get(i), userDetails.getUsername());
 
                 PieceResponseDTO response = PieceResponseDTO.builder()
                         .id(piece.getId())
@@ -113,8 +118,9 @@ public class DocumentController {
     // ============== CONSULTATION DE DOCUMENTS ==============
 
     @GetMapping("/{id}")
-    public ResponseEntity<DocumentDetailDTO> getDocument(@PathVariable Long id) {
-        Document document = documentService.getDocumentForValidation(id);
+    public ResponseEntity<DocumentDetailDTO> getDocument(@PathVariable Long id,
+                                                         @AuthenticationPrincipal UserDetails userDetails) {
+        Document document = documentService.getDocumentForValidation(id, userDetails.getUsername());
 
         DocumentDetailDTO dto = DocumentDetailDTO.builder()
                 .id(document.getId())
@@ -145,9 +151,10 @@ public class DocumentController {
     @GetMapping
     public ResponseEntity<List<DocumentSummaryDTO>> getAllDocuments(
             @RequestParam(required = false) String title,
-            @RequestParam(required = false) DocumentStatus status) {
+            @RequestParam(required = false) DocumentStatus status,
+            @AuthenticationPrincipal UserDetails userDetails) {
 
-        List<Document> documents = documentService.searchDocuments(title, status);
+        List<Document> documents = documentService.searchDocuments(title, status, userDetails.getUsername());
 
         List<DocumentSummaryDTO> summaries = documents.stream()
                 .map(doc -> DocumentSummaryDTO.builder()
@@ -168,8 +175,9 @@ public class DocumentController {
     // ============== VALIDATION DE DOCUMENT ==============
 
     @PostMapping("/{id}/validate")
-    public ResponseEntity<DocumentValidationResponseDTO> validateDocument(@PathVariable Long id) {
-        DocumentValidationResponseDTO response = documentService.validateDocument(id);
+    public ResponseEntity<DocumentValidationResponseDTO> validateDocument(@PathVariable Long id,
+                                                                          @AuthenticationPrincipal UserDetails userDetails) {
+        DocumentValidationResponseDTO response = documentService.validateDocument(id, userDetails.getUsername());
 
         if (response.isSuccess()) {
             return ResponseEntity.ok(response);
@@ -185,34 +193,38 @@ public class DocumentController {
     @PutMapping("/{id}")
     public ResponseEntity<Document> updateDocument(
             @PathVariable Long id,
-            @Valid @RequestBody DocumentUpdateDTO dto) {
-        Document document = documentService.updateDocument(id, dto);
+            @Valid @RequestBody DocumentUpdateDTO dto,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Document document = documentService.updateDocument(id, dto, userDetails.getUsername());
         return ResponseEntity.ok(document);
     }
 
-    @PatchMapping("/{id}/status")
-    public ResponseEntity<Document> updateDocumentStatus(
-            @PathVariable Long id,
-            @RequestParam DocumentStatus status) {
-        Document document = documentService.updateDocumentStatus(id, status);
-        return ResponseEntity.ok(document);
-    }
+//    @PatchMapping("/{id}/status")
+//    public ResponseEntity<Document> updateDocumentStatus(
+//            @PathVariable Long id,
+//            @RequestParam DocumentStatus status,
+//            @AuthenticationPrincipal UserDetails userDetails) {
+//        Document document = documentService.updateDocumentStatus(id, status, userDetails.getUsername());
+//        return ResponseEntity.ok(document);
+//    }
 
 
 
     // ============== SUPPRESSION ==============
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<MessageResponseDTO> deleteDocument(@PathVariable Long id) {
-        documentService.deleteDocument(id);
+    public ResponseEntity<MessageResponseDTO> deleteDocument(@PathVariable Long id,
+                                                             @AuthenticationPrincipal UserDetails userDetails) {
+        documentService.deleteDocument(id, userDetails.getUsername());
         return ResponseEntity.ok(new MessageResponseDTO("Document supprimé avec succès"));
     }
 
     @DeleteMapping("/{documentId}/pieces/{pieceId}")
     public ResponseEntity<MessageResponseDTO> deletePiece(
             @PathVariable Long documentId,
-            @PathVariable Long pieceId) {
-        documentService.deletePiece(documentId, pieceId);
+            @PathVariable Long pieceId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        documentService.deletePiece(documentId, pieceId,  userDetails.getUsername());
         return ResponseEntity.ok(new MessageResponseDTO("Pièce supprimée avec succès"));
     }
 
@@ -221,8 +233,8 @@ public class DocumentController {
     // ============== STATISTIQUES ==============
 
     @GetMapping("/stats")
-    public ResponseEntity<DocumentStatsDTO> getDocumentStats() {
-        DocumentStatsDTO stats = documentService.getDocumentStatistics();
+    public ResponseEntity<DocumentStatsDTO> getDocumentStats(@AuthenticationPrincipal UserDetails userDetails) {
+        DocumentStatsDTO stats = documentService.getDocumentStatistics(userDetails.getUsername());
         return ResponseEntity.ok(stats);
     }
 }

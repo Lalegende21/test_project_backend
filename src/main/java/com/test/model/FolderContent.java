@@ -21,7 +21,6 @@ import java.util.List;
 public class FolderContent extends BaseEntity {
 
     @NotBlank
-    @Column(unique = true)
     @Size(min = 5, message = "Le nom doit être minimum de 5 caractères")
     private String name;
 

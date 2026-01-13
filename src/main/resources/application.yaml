@@ -27,6 +27,9 @@ spring:
 server:
   servlet:
     context-path: /api
+    session:
+      cookie:
+        same-site: lax
 
 project:
   document: documents/
@@ -37,3 +40,8 @@ frontend:
 document:
   base:
     url: ${DOCUMENT_BASE_URL}
+
+# Configuration JWT
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: ${JWT_EXPIRATION}

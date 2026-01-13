@@ -1,15 +1,11 @@
 package com.test.service;
 
+import com.test.enums.DocumentPermission;
+import com.test.enums.DocumentRole;
 import com.test.enums.DocumentStatus;
-import com.test.model.Document;
-import com.test.model.Folder;
-import com.test.model.FolderContent;
-import com.test.model.Piece;
+import com.test.model.*;
 import com.test.payload.*;
-import com.test.repository.DocumentRepo;
-import com.test.repository.FolderContentRepo;
-import com.test.repository.FolderRepo;
-import com.test.repository.PieceRepo;
+import com.test.repository.*;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -30,10 +27,16 @@ public class DocumentService {
     private final FolderRepo folderRepo;
     private final FolderContentRepo folderContentRepo;
     private final PieceRepo pieceRepo;
+    private final UserRepo userRepo;
+    private final DocumentPermissionService permissionService;
 
 
-    public Document createDocument(DocumentCreateDTO payload) {
+    public Document createDocument(DocumentCreateDTO payload, String username) {
         log.info("Debut de la creation du document {}", payload);
+
+        // Récupérer l'utilisateur connecté
+        User currentUser = userRepo.findByUsername(username)
+                .orElseThrow(() -> new EntityNotFoundException("Utilisateur non trouvé"));
 
         // Valider que le dossier existe
         if (payload.getFolderId() == null) {
@@ -61,6 +64,20 @@ public class DocumentService {
                 .description(payload.getDescription())
                 .metadata(metadata)
                 .status(DocumentStatus.BROUILLON)
+                .createdBy(currentUser)
+                .documentUsers(new ArrayList<>())
+                .build();
+
+        document = documentRepo.save(document);
+
+        // Créer automatiquement l'assignation OWNER pour le créateur
+        DocumentUser ownerAssignment = DocumentUser.builder()
+                .document(document)
+                .user(currentUser)
+                .role(DocumentRole.OWNER)
+                .permissions(DocumentRole.OWNER.getPermissions())
+                .assignedAt(LocalDateTime.now())
+                .assignedBy(currentUser)
                 .build();
 
         log.info("Sauvegarde et fin de la creation du document");
@@ -68,8 +85,13 @@ public class DocumentService {
     }
 
 
-    public Piece uploadAndClassifyPiece(Long documentId, MultipartFile file) throws Exception {
+    public Piece uploadAndClassifyPiece(Long documentId, MultipartFile file, String username) throws Exception {
         log.info("Debut de l'upload et de la classification des pieces");
+
+        // Vérifier la permission UPLOAD
+        if (!permissionService.hasPermission(documentId, username, DocumentPermission.UPLOAD)) {
+            throw new SecurityException("Vous n'avez pas la permission d'ajouter des pièces à ce document");
+        }
 
         // Verifier si le document existe
         Document document = this.documentRepo.findById(documentId)
@@ -97,7 +119,12 @@ public class DocumentService {
     }
 
 
-    public Document getDocumentForValidation(Long id) {
+    public Document getDocumentForValidation(Long id, String username) {
+        // Vérifier la permission VIEW
+        if (!permissionService.hasPermission(id, username, DocumentPermission.VIEW)) {
+            throw new SecurityException("Vous n'avez pas accès à ce document");
+        }
+
         return this.documentRepo.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Document non trouvé"));
     }
@@ -106,7 +133,12 @@ public class DocumentService {
     /**
      * Valider un document en vérifiant que toutes les pièces obligatoires sont présentes
      */
-    public DocumentValidationResponseDTO validateDocument(Long id) {
+    public DocumentValidationResponseDTO validateDocument(Long id, String username) {
+        // Vérifier la permission VALIDATE
+        if (!permissionService.hasPermission(id, username, DocumentPermission.VALIDATE)) {
+            throw new SecurityException("Vous n'avez pas la permission de valider ce document");
+        }
+
         Document doc = this.documentRepo.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Document non trouvé"));
 
@@ -153,21 +185,25 @@ public class DocumentService {
                 .build();
     }
 
-    public List<Document> searchDocuments(String title, DocumentStatus status) {
-        // Implémentation basique de recherche
-        if (title != null && status != null) {
-            return documentRepo.findByTitleContainingIgnoreCaseAndStatus(title, status);
-        } else if (title != null) {
-            return documentRepo.findByTitleContainingIgnoreCase(title);
-        } else if (status != null) {
-            return documentRepo.findByStatus(status);
-        }
-        return documentRepo.findAll();
+    public List<Document> searchDocuments(String title, DocumentStatus status, String username) {
+        // Récupérer les documents de l'utilisateur
+        List<Document> userDocuments = permissionService.getUserDocuments(username);
+
+        // Appliquer les filtres
+        return userDocuments.stream()
+                .filter(doc -> title == null || doc.getTitle().toLowerCase().contains(title.toLowerCase()))
+                .filter(doc -> status == null || doc.getStatus() == status)
+                .collect(Collectors.toList());
     }
 
 
-    public Document updateDocument(Long id, DocumentUpdateDTO dto) {
-        Document document = getDocumentForValidation(id);
+    public Document updateDocument(Long id, DocumentUpdateDTO dto, String username) {
+        // Vérifier la permission EDIT
+        if (!permissionService.hasPermission(id, username, DocumentPermission.EDIT)) {
+            throw new SecurityException("Vous n'avez pas la permission de modifier ce document");
+        }
+
+        Document document = getDocumentForValidation(id, username);
 
         if (dto.getTitle() != null) {
             document.setTitle(dto.getTitle());
@@ -182,21 +218,31 @@ public class DocumentService {
         return documentRepo.save(document);
     }
 
-    public Document updateDocumentStatus(Long id, DocumentStatus status) {
-        Document document = getDocumentForValidation(id);
+    public Document updateDocumentStatus(Long id, String username, DocumentStatus status) {
+        Document document = getDocumentForValidation(id, username);
         document.setStatus(status);
         return documentRepo.save(document);
     }
 
 
-    public void deleteDocument(Long id) {
-        Document document = getDocumentForValidation(id);
+    public void deleteDocument(Long id, String username) {
+        // Vérifier la permission MANAGE (seul le owner peut supprimer)
+        if (!permissionService.hasPermission(id, username, DocumentPermission.MANAGE)) {
+            throw new SecurityException("Seul le propriétaire peut supprimer ce document");
+        }
+
+        Document document = getDocumentForValidation(id, username);
         documentRepo.delete(document);
     }
 
 
-    public void deletePiece(Long documentId, Long pieceId) {
-        Document document = getDocumentForValidation(documentId);
+    public void deletePiece(Long documentId, Long pieceId, String username) {
+        // Vérifier la permission DELETE
+        if (!permissionService.hasPermission(documentId, username, DocumentPermission.DELETE)) {
+            throw new SecurityException("Vous n'avez pas la permission de supprimer des pièces");
+        }
+
+        Document document = getDocumentForValidation(documentId, username);
         Piece piece = document.getPieces().stream()
                 .filter(p -> p.getId().equals(pieceId))
                 .findFirst()
@@ -206,12 +252,16 @@ public class DocumentService {
         documentRepo.save(document);
     }
 
-    public DocumentStatsDTO getDocumentStatistics() {
-        long total = documentRepo.count();
-        long enCours = documentRepo.countByStatus(DocumentStatus.EN_COURS);
-        long valides = documentRepo.countByStatus(DocumentStatus.VALIDE);
-        long brouillon = documentRepo.countByStatus(DocumentStatus.BROUILLON);
-        long totalPieces = pieceRepo.count();
+    public DocumentStatsDTO getDocumentStatistics(String username) {
+        User user = userRepo.findByUsername(username).orElseThrow();
+
+        List<Document> userDocs = permissionService.getUserDocuments(username);
+
+        long total = userDocs.size();
+        long enCours = userDocs.stream().filter(d -> d.getStatus() == DocumentStatus.EN_COURS).count();
+        long valides = userDocs.stream().filter(d -> d.getStatus() == DocumentStatus.VALIDE).count();
+        long brouillon = userDocs.stream().filter(d -> d.getStatus() == DocumentStatus.BROUILLON).count();
+        long totalPieces = userDocs.stream().mapToLong(d -> d.getPieces().size()).sum();
 
         return DocumentStatsDTO.builder()
                 .totalDocuments(total)
@@ -219,6 +269,44 @@ public class DocumentService {
                 .documentsValides(valides)
                 .documentsBrouillon(brouillon)
                 .totalPieces(totalPieces)
+                .build();
+    }
+
+
+    public DocumentWithUsersDTO getDocumentWithUsers(Long id, String username) {
+        if (!permissionService.hasPermission(id, username, DocumentPermission.VIEW)) {
+            throw new SecurityException("Vous n'avez pas accès à ce document");
+        }
+
+        Document doc = documentRepo.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Document non trouvé"));
+
+        List<DocumentUserDTO> users = permissionService.getDocumentUsers(id, username);
+
+        return DocumentWithUsersDTO.builder()
+                .id(doc.getId())
+                .title(doc.getTitle())
+                .description(doc.getDescription())
+                .status(doc.getStatus())
+                .metadata(doc.getMetadata())
+                .pieces(doc.getPieces().stream()
+                        .map(p -> PieceResponseDTO.builder()
+                                .id(p.getId())
+                                .fileName(p.getFileName())
+                                .fileSize(p.getFileSize())
+                                .fileType(p.getFileType())
+                                .pieceUrl(p.getPieceUrl())
+                                .contentId(p.getContent().getId())
+                                .contentName(p.getContent().getName())
+                                .isRequired(p.getContent().isRequired())
+                                .createdAt(p.getCreatedAt())
+                                .build())
+                        .collect(Collectors.toList()))
+                .users(users)
+                .createdByUserId(doc.getCreatedBy().getId())
+                .createdByUsername(doc.getCreatedBy().getUsername())
+                .createdAt(doc.getCreatedAt())
+                .updatedAt(doc.getUpdatedAt())
                 .build();
     }
 }

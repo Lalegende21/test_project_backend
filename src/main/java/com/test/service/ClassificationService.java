@@ -75,12 +75,6 @@ public class ClassificationService {
     public FolderContent createContent(FolderContentDTO folderContentDTO) {
         log.info("Debut de la creation du contenu {}", folderContentDTO);
 
-        // Vérifier si un folderContent avec ce nom existe déjà
-        if (folderContentRepo.existsByName(folderContentDTO.getName())) {
-            log.error("Un contenu avec ce nom: {}, existe déjà",  folderContentDTO.getName());
-            throw new IllegalArgumentException("Un contenu avec ce nom existe déjà");
-        }
-
         FolderContent folderContent = FolderContent.builder()
                 .name(folderContentDTO.getName())
                 .description(folderContentDTO.getDescription())
